@@ -30,7 +30,6 @@ colors_ranges = {
 }
 
 def identify_color(crop_img):
-    """根据裁剪图像检测颜色，输入图像要求为RGB格式"""
     hsv_img = cv2.cvtColor(crop_img, cv2.COLOR_RGB2HSV)
     for color_name, (lower, upper) in colors_ranges.items():
         mask = cv2.inRange(hsv_img, np.array(lower), np.array(upper))
@@ -39,7 +38,6 @@ def identify_color(crop_img):
     return "unknown"
 
 def compute_iou(box1, box2):
-    """计算两个边界框的 IoU 值"""
     x1, y1, x2, y2 = box1
     xx1, yy1, xx2, yy2 = box2
     inter_x1 = max(x1, xx1)
@@ -52,17 +50,11 @@ def compute_iou(box1, box2):
     iou = inter_area / (area1 + area2 - inter_area + 1e-6)
     return iou
 
-def get_center(bbox):
-    """返回检测框中心坐标"""
-    x1, y1, x2, y2 = bbox
-    return ((x1 + x2) // 2, (y1 + y2) // 2)
-
 def compute_ball_radius(_):
-    """固定球的半径为22像素（对应45×45的尺寸）"""
-    return 22
+    """固定球的半径为21.5像素（对应直径43像素）"""
+    return 21.5
 
 def distance_point_to_line(P, A, B):
-    """返回点 P 到直线 AB 的距离（不限定在线段上）"""
     A3 = np.append(np.array(A, dtype=float), 0)
     B3 = np.append(np.array(B, dtype=float), 0)
     P3 = np.append(np.array(P, dtype=float), 0)
@@ -70,7 +62,6 @@ def distance_point_to_line(P, A, B):
     return np.linalg.norm(cross) / (np.linalg.norm(B3 - A3) + 1e-6)
 
 def is_point_on_segment(P, A, B):
-    """判断点 P 的投影是否在线段 AB 内"""
     A = np.array(A, dtype=float)
     B = np.array(B, dtype=float)
     P = np.array(P, dtype=float)
@@ -80,11 +71,6 @@ def is_point_on_segment(P, A, B):
     return 0 <= t <= 1
 
 def is_path_clear(A, B, obstacles, moving_ball_radius):
-    """
-    检查从 A 到 B 的直线路径上是否有障碍（考虑球体半径）
-    obstacles 为包含字典 { 'center': (x, y), 'radius': r } 的列表，
-    若障碍球到直线的距离小于 (moving_ball_radius + obstacle_radius) 且其投影在线段上，则视为阻挡
-    """
     for obs in obstacles:
         obs_center = obs['center']
         obs_radius = obs['radius']
@@ -96,9 +82,7 @@ def is_path_clear(A, B, obstacles, moving_ball_radius):
 
 def normalize(v):
     norm = np.linalg.norm(v)
-    if norm == 0:
-        return v
-    return v / norm
+    return v if norm == 0 else (v / norm)
 
 # 全局变量：记录最新检测到的所有球、目标球、方案及是否已执行判断
 last_detections = []
@@ -112,17 +96,16 @@ mouse_moved = False      # 标记是否已经移动过鼠标
 def select_target_or_shot(event, x, y, flags, param):
     """
     鼠标回调函数：
-    由于显示图像经过了缩放，所以这里将鼠标点击的预览窗口坐标转换回原始截图区域的坐标，
-    再进行后续处理。
+    将鼠标点击的预览窗口坐标转换回原始截图区域的坐标，
+    再进行目标球或目标袋口的选择处理。
     """
     global selected_target, last_detections, judgement_executed, shot_plans, selected_shot_plan, mouse_moved
 
-    # 将预览窗口的坐标转换为原始截图区域坐标
     orig_x = int(x / scale_x)
     orig_y = int(y / scale_y)
 
     if event == cv2.EVENT_LBUTTONDOWN:
-        # 若存在击打方案，优先检测是否点击袋口（这里判断时直接使用原始区域坐标）
+        # 若存在击打方案，先检测是否点击袋口
         if shot_plans:
             for plan in shot_plans:
                 pocket_coord = plan['pocket']
@@ -130,15 +113,22 @@ def select_target_or_shot(event, x, y, flags, param):
                 if d < 30:
                     selected_shot_plan = plan
                     print(f"选定方案：袋口【{plan['pocket_name']}】")
-                    # 计算预测的目标击球绝对屏幕坐标
-                    abs_white_hit_center = (monitor['left'] + plan['white_hit_center'][0],
-                                            monitor['top'] + plan['white_hit_center'][1])
-                    print("预测的目标击球位置（绝对屏幕坐标）：", abs_white_hit_center)
-                    if not mouse_moved:
-                        pyautogui.moveTo(abs_white_hit_center[0], abs_white_hit_center[1], duration=0.2)
-                        mouse_moved = True
+                    # 目标击球位置
+                    abs_target_contact_point = (
+                        monitor['left'] + plan['target_contact_point'][0],
+                        monitor['top'] + plan['target_contact_point'][1]
+                    )
+                    print("预测的目标击球位置（绝对屏幕坐标）：", abs_target_contact_point)
+                    # 移动鼠标并自动点击一次左键
+                    pyautogui.moveTo(abs_target_contact_point[0],
+                                       abs_target_contact_point[1])
+                    time.sleep(0.3)
+                    pyautogui.click()
+                    pyautogui.click()   # 自动点击一次左键
+                    mouse_moved = True
                     return
-        # 判断是否点击目标球（这里使用原始截图区域的坐标进行计算）
+
+        # 如果没有点击袋口，则尝试选定目标球
         min_distance = float('inf')
         chosen = None
         for det in last_detections:
@@ -158,12 +148,11 @@ def select_target_or_shot(event, x, y, flags, param):
 
 def main():
     global last_detections, selected_target, judgement_executed, shot_executed, shot_plans, selected_shot_plan, mouse_moved
-    fixed_size = 45
-    half1 = fixed_size // 2      # 22
-    half2 = fixed_size - half1     # 23
+    fixed_size = 43  # 固定尺寸设为43（直径43，即球半径21.5）
+    half1 = fixed_size // 2      # 43//2 = 21
+    half2 = fixed_size - half1   # 43 - 21 = 22
 
     cv2.namedWindow("Detect", cv2.WINDOW_NORMAL)
-    # 不再调用 cv2.resizeWindow，而是在显示前对图像做缩放
     cv2.moveWindow("Detect", 0, 0)
     cv2.setMouseCallback("Detect", select_target_or_shot)
 
@@ -186,10 +175,12 @@ def main():
             
             detections = []
             for i, box in enumerate(results[0].boxes.xyxy):
-                # 取检测框中心，并以固定尺寸构造45×45的边界框
+                # 取检测框中心，并以固定尺寸构造43×43的边界框
                 orig_box = list(map(int, box.tolist()))
-                center = ((orig_box[0] + orig_box[2]) // 2, (orig_box[1] + orig_box[3]) // 2)
-                bbox = (center[0] - half1, center[1] - half1, center[0] + half2, center[1] + half2)
+                center = ((orig_box[0] + orig_box[2]) // 2,
+                          (orig_box[1] + orig_box[3]) // 2)
+                bbox = (center[0] - half1, center[1] - half1,
+                        center[0] + half2, center[1] + half2)
                 cls = int(results[0].boxes.cls[i])
                 label = model.names[cls] if hasattr(model, "names") else str(cls)
                 conf = float(results[0].boxes.conf[i])
@@ -212,7 +203,7 @@ def main():
                             if compute_iou(det_white['bbox'], det['bbox']) > iou_threshold:
                                 final_detections.remove(det)
             
-            # 在原始 frame 上绘制检测框和颜色信息
+            # 绘制检测框和颜色信息
             for det in final_detections:
                 x1, y1, x2, y2 = det['bbox']
                 label = det['label']
@@ -241,29 +232,26 @@ def main():
             
             if white_det is not None and selected_target is not None and not judgement_executed:
                 white_center = white_det['center']
-                white_radius = white_det['radius']
+                white_radius = white_det['radius']  # 此时白球半径为21.5
                 target = selected_target  # 用户选定的目标球
                 target_center = target['center']
-                target_radius = target['radius']
+                target_radius = target['radius']  # 目标球半径也设为21.5
                 
                 shot_plans.clear()
                 # 遍历每个袋口，计算击球方案
                 for pocket_name, pocket_coord in pockets.items():
-                    # 计算目标球到袋口的方向向量
                     v_tp = np.array(pocket_coord) - np.array(target_center)
                     if np.linalg.norm(v_tp) == 0:
                         continue
                     v_tp_norm = normalize(v_tp)
-                    # 目标接触点在目标球中心沿远离袋口方向固定45px处
-                    target_contact_point = np.array(target_center) - 45 * v_tp_norm
-                    # 白球击球位置：在目标接触点再沿同一方向后退白球半径
+                    # 目标接触点：目标球中心沿远离袋口方向 43 像素（球直径43）
+                    target_contact_point = np.array(target_center) - 43 * v_tp_norm
+                    # 白球击球位置：在 target_contact_point 再沿同一方向后退白球半径（21.5像素）
                     white_hit_center = target_contact_point - white_radius * v_tp_norm
 
-                    # 检查白球到击球位置路径是否畅通
                     obstacles_w = [det for det in final_detections if det['center'] not in (white_center, target_center)]
                     if not is_path_clear(white_center, tuple(white_hit_center.astype(int)), obstacles_w, white_radius):
                         continue
-                    # 检查目标球到袋口路径是否畅通
                     obstacles_tp = [det for det in final_detections if det['center'] != target_center]
                     if not is_path_clear(target_center, pocket_coord, obstacles_tp, target_radius):
                         continue
@@ -276,7 +264,6 @@ def main():
                         'white_center': white_center,
                         'target_center': target_center
                     })
-                    # 绘制参考线（原始图上绘制）
                     cv2.line(frame, white_center, tuple(white_hit_center.astype(int)), (255, 0, 0), 2)
                     cv2.line(frame, target_center, pocket_coord, (255, 0, 0), 2)
                     cv2.circle(frame, tuple(white_hit_center.astype(int)), 6, (255, 255, 0), -1)
@@ -289,17 +276,16 @@ def main():
                 
                 judgement_executed = True
             
-            # 当选定方案后，仅绘制预测轨迹
+            # 选定方案后：画红色轨迹 + 画实际43×43像素的圆（半径取 int(round(21.5))）
             if selected_shot_plan is not None:
-                cv2.line(frame, selected_shot_plan['white_center'], selected_shot_plan['white_hit_center'], (0, 0, 255), 2)
-                cv2.line(frame, selected_shot_plan['target_center'], selected_shot_plan['pocket'], (0, 0, 255), 2)
+                cv2.line(frame, selected_shot_plan['white_center'],
+                         selected_shot_plan['target_contact_point'], (0, 0, 255), 2)
+                cv2.line(frame, selected_shot_plan['target_center'],
+                         selected_shot_plan['pocket'], (0, 0, 255), 2)
+                
                 landing = selected_shot_plan['target_contact_point']
-                yellow_dot_radius = int(target_radius * 0.4)
-                cv2.circle(frame, landing, yellow_dot_radius, (0, 255, 255), -1)
-                cv2.putText(frame, "Estimate", (landing[0] + 5, landing[1] - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                cv2.circle(frame, landing, int(round(21.5)), (0, 255, 255), 2)
             
-            # 对原始 frame 进行缩放后显示，保证鼠标回调坐标与显示图像一致
             scaled_frame = cv2.resize(frame, (preview_width, preview_height))
             cv2.imshow("Detect", scaled_frame)
             key = cv2.waitKey(1) & 0xFF
