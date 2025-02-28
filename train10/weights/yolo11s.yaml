@@ -1,0 +1,11 @@
+type: yolo11
+name: yolo11s-r20240930
+display_name: YOLO11s Ultralytics
+model_path: last.onnx
+nms_threshold: 0.45
+confidence_threshold: 0.25
+classes:
+  - White
+  - Black
+  - Odd
+  - Even

@@ -1,0 +1,6 @@
+train: E:\OneDrive\Gits\YoloBilliards\dataset\images\Train
+val: E:\OneDrive\Gits\YoloBilliards\dataset\images\Val
+
+
+nc: 4   # 类别数，根据你的情况修改
+names: ['White', 'Black','Odd','Even']  # 修改为实际类别名称
